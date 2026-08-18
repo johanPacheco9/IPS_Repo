@@ -1,0 +1,393 @@
+@page "/agendamiento"
+@rendermode InteractiveServer
+@inject ICitaRepository CitaRepository
+@inject IPacienteRepository PacienteRepository
+@inject IProfesionalRepository ProfesionalRepository
+
+<PageTitle>Agendamiento de Citas - IPS SaaS</PageTitle>
+
+<div class="space-y-6">
+    <!-- Header Section -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="p-2 rounded-xl bg-amber-50 text-amber-600 text-xl font-bold">
+                    <i class="bi bi-calendar-event-fill"></i>
+                </span>
+                <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Agendamiento de Citas Médicas</h1>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Gestión de disponibilidades y flujo de atención (Programada ➔ Sala Espera ➔ Consulta ➔ Atendida)</p>
+        </div>
+        <button class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm shadow-lg shadow-amber-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]" @onclick="AbrirFormularioNuevo">
+            <i class="bi bi-calendar-plus-fill"></i> Agendar Cita Médica
+        </button>
+    </div>
+
+    <!-- Notifications -->
+    @if (!string.IsNullOrEmpty(mensajeExito))
+    {
+        <div class="flex items-center justify-between p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium">
+            <div class="flex items-center gap-2">
+                <i class="bi bi-check-circle-fill text-emerald-600 text-lg"></i>
+                <span>@mensajeExito</span>
+            </div>
+            <button class="text-emerald-600 hover:text-emerald-800 font-bold" @onclick="() => mensajeExito = null">×</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="flex items-center justify-between p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium">
+            <div class="flex items-center gap-2">
+                <i class="bi bi-exclamation-triangle-fill text-red-600 text-lg"></i>
+                <span>@mensajeError</span>
+            </div>
+            <button class="text-red-600 hover:text-red-800 font-bold" @onclick="() => mensajeError = null">×</button>
+        </div>
+    }
+
+    <!-- Form Section -->
+    @if (mostrarFormulario)
+    {
+        <div class="bg-white rounded-2xl border border-amber-200 shadow-xl overflow-hidden ring-4 ring-amber-500/10">
+            <div class="bg-gradient-to-r from-amber-600 to-sky-600 px-6 py-4 text-white flex items-center justify-between">
+                <h3 class="font-bold text-base flex items-center gap-2">
+                    <i class="bi bi-calendar-plus"></i> Programar Nueva Cita Médica
+                </h3>
+                <button type="button" class="text-white/80 hover:text-white font-bold text-xl" @onclick="CancelarFormulario">×</button>
+            </div>
+            <div class="p-6 space-y-6">
+                <!-- Búsqueda de Paciente por Cédula -->
+                <div class="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                        <i class="bi bi-search text-sky-600"></i> Búsqueda de Paciente por Documento de Identidad
+                    </h4>
+
+                    <div class="flex flex-col sm:flex-row items-end gap-3">
+                        <div class="w-full sm:w-44">
+                            <label class="block text-xs font-bold text-slate-600 mb-1">Tipo Doc</label>
+                            <select class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none" @bind="busquedaTipoDoc">
+                                @foreach (var tipo in Enum.GetValues<TipoDocumento>())
+                                {
+                                    <option value="@tipo">@tipo</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="flex-1 w-full">
+                            <label class="block text-xs font-bold text-slate-600 mb-1">Número de Documento *</label>
+                            <input type="text" class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none" placeholder="Ingrese número de cédula / TI..." @bind="busquedaNumDoc" @onkeyup="OnBuscarKeyup" />
+                        </div>
+                        <button type="button" class="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold shadow-md flex items-center gap-2" @onclick="BuscarPacientePorDocumento">
+                            <i class="bi bi-search"></i> Buscar Paciente
+                        </button>
+                    </div>
+
+                    <!-- Mensaje si no se encuentra -->
+                    @if (busquedaRealizada && pacienteSeleccionado == null)
+                    {
+                        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center justify-between">
+                            <span>No se encontró ningún paciente con @busquedaTipoDoc @busquedaNumDoc.</span>
+                            <a href="pacientes" class="font-bold underline text-amber-900">Registrar Paciente Nuevo</a>
+                        </div>
+                    }
+
+                    <!-- Card de Confirmación del Paciente Encontrado (PacienteDto Record) -->
+                    @if (pacienteSeleccionado != null)
+                    {
+                        <div class="p-4 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center text-lg">
+                                    <i class="bi bi-person-check-fill"></i>
+                                </div>
+                                <div>
+                                    <h5 class="font-bold text-sm text-slate-900">@pacienteSeleccionado.NombreCompleto</h5>
+                                    <p class="text-xs text-slate-600 font-mono">
+                                        @pacienteSeleccionado.TipoDocumento @pacienteSeleccionado.NumeroDocumento | @pacienteSeleccionado.Edad años | EPS: <strong>@pacienteSeleccionado.EpsNombre</strong> | Régimen: @pacienteSeleccionado.RegimenSalud
+                                    </p>
+                                </div>
+                            </div>
+                            <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold self-start sm:self-auto">
+                                <i class="bi bi-check-circle-fill"></i> Paciente Confirmado
+                            </span>
+                        </div>
+                    }
+                </div>
+
+                <!-- Formulario Cita Médica -->
+                <EditForm Model="@modelo" OnValidSubmit="GuardarCita">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold" />
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Médico / Especialista *</label>
+                            <InputSelect class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" @bind-Value="modelo.ProfesionalId">
+                                <option value="@Guid.Empty">-- Seleccione Profesional --</option>
+                                @if (profesionales != null)
+                                {
+                                    @foreach (var prof in profesionales)
+                                    {
+                                        <option value="@prof.Id">@prof.NombreCompleto - @prof.Especialidad (RETHUS: @prof.NumeroRethus)</option>
+                                    }
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Fecha y Hora de la Cita *</label>
+                            <InputDate Type="InputDateType.DateTimeLocal" class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" @bind-Value="modelo.FechaHora" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Duración (Minutos)</label>
+                            <InputNumber class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" @bind-Value="modelo.DuracionMinutos" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Motivo de Consulta *</label>
+                            <InputText class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" @bind-Value="modelo.MotivoConsulta" placeholder="Ej: Control Medicina General, Chequeo de rutina" />
+                        </div>
+
+                        <div class="md:col-span-2">
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Observaciones Adicionales</label>
+                            <InputTextArea class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" @bind-Value="modelo.Observaciones" rows="2" />
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-100">
+                        <button type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-100 transition-colors" @onclick="CancelarFormulario">Cancelar</button>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold shadow-md shadow-amber-600/20 transition-all flex items-center gap-2" disabled="@(pacienteSeleccionado == null)">
+                            <i class="bi bi-save"></i> Agendar Cita
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+
+    <!-- Table Card -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div class="p-5 border-b border-slate-100 bg-slate-50/50">
+            <h2 class="font-bold text-slate-900 text-base">Control de Flujo de Atención Médica</h2>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+                <thead>
+                    <tr class="bg-slate-100/70 border-b border-slate-200/60 text-slate-500 font-bold uppercase text-[11px] tracking-wider">
+                        <th class="py-3.5 px-4">Fecha y Hora</th>
+                        <th class="py-3.5 px-4">Paciente</th>
+                        <th class="py-3.5 px-4">Médico / Especialidad</th>
+                        <th class="py-3.5 px-4">Motivo Consulta</th>
+                        <th class="py-3.5 px-4">Estado de Cita</th>
+                        <th class="py-3.5 px-4 text-center">Acciones de Estado (RBAC)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-700">
+                    @if (citas == null)
+                    {
+                        <tr><td colspan="6" class="p-8 text-center text-slate-400">Cargando citas médicas...</td></tr>
+                    }
+                    else if (!citas.Any())
+                    {
+                        <tr><td colspan="6" class="p-8 text-center text-slate-400">No hay citas registradas en el sistema.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var c in citas)
+                        {
+                            <tr class="hover:bg-slate-50/80 transition-colors">
+                                <td class="py-3.5 px-4 font-semibold text-slate-900">
+                                    <div class="flex items-center gap-1.5 text-slate-900 font-bold">
+                                        <i class="bi bi-clock text-amber-600"></i> @c.FechaHora.ToString("dd/MM/yyyy hh:mm tt")
+                                    </div>
+                                    <span class="text-[11px] text-slate-400">@c.DuracionMinutos min</span>
+                                </td>
+                                <td class="py-3.5 px-4">
+                                    <div class="font-semibold text-slate-900">@c.NombrePaciente</div>
+                                    <span class="inline-block text-[11px] text-sky-700 font-medium bg-sky-50 px-2 py-0.5 rounded">@c.DocumentoPaciente</span>
+                                </td>
+                                <td class="py-3.5 px-4">
+                                    <div class="font-semibold text-slate-900">@c.NombreProfesional</div>
+                                    <span class="text-xs text-slate-500">@c.Especialidad</span>
+                                </td>
+                                <td class="py-3.5 px-4 max-w-xs truncate">@c.MotivoConsulta</td>
+                                <td class="py-3.5 px-4">
+                                    @switch (c.Estado)
+                                    {
+                                        case EstadoCita.Programada:
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-bold">Programada</span>
+                                            break;
+                                        case EstadoCita.EnSalaDeEspera:
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold animate-pulse">En Sala de Espera</span>
+                                            break;
+                                        case EstadoCita.EnConsulta:
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 text-xs font-bold">En Consulta</span>
+                                            break;
+                                        case EstadoCita.Atendida:
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">Atendida</span>
+                                            break;
+                                        case EstadoCita.Cancelada:
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-red-100 text-red-800 text-xs font-bold">Cancelada</span>
+                                            break;
+                                    }
+                                </td>
+                                <td class="py-3.5 px-4 text-center">
+                                    <div class="inline-flex items-center gap-1.5">
+                                        @if (c.Estado == EstadoCita.Programada)
+                                        {
+                                            <button class="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold shadow-xs transition-all" title="Admitir en sala de espera" @onclick="() => CambiarEstado(c.Id, EstadoCita.EnSalaDeEspera)">
+                                                Admitir
+                                            </button>
+                                            <button class="px-2.5 py-1 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 text-xs font-semibold transition-all" title="Cancelar Cita" @onclick="() => CambiarEstado(c.Id, EstadoCita.Cancelada)">
+                                                Cancelar
+                                            </button>
+                                        }
+                                        else if (c.Estado == EstadoCita.EnSalaDeEspera)
+                                        {
+                                            <button class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-all" title="Llamar a consulta" @onclick="() => CambiarEstado(c.Id, EstadoCita.EnConsulta)">
+                                                Llamar Consulta
+                                            </button>
+                                        }
+                                        else if (c.Estado == EstadoCita.EnConsulta)
+                                        {
+                                            <button class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-all" title="Finalizar cita" @onclick="() => CambiarEstado(c.Id, EstadoCita.Atendida)">
+                                                Finalizar
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<CitaDto>? citas;
+    private List<ProfesionalDto>? profesionales;
+    private bool mostrarFormulario = false;
+
+    // Campos de Búsqueda de Paciente
+    private TipoDocumento busquedaTipoDoc = TipoDocumento.CC;
+    private string busquedaNumDoc = string.Empty;
+    private PacienteDto? pacienteSeleccionado;
+    private bool busquedaRealizada = false;
+
+    private AgendarCitaRequest modelo = new();
+    private string? mensajeExito;
+    private string? mensajeError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarDatos();
+    }
+
+    private async Task CargarDatos()
+    {
+        var resProfs = await ProfesionalRepository.GetActivosAsync();
+        if (resProfs.IsSuccess && resProfs.Value != null) profesionales = resProfs.Value.ToList();
+
+        var resCitas = await CitaRepository.GetAllAsync();
+        if (resCitas.IsSuccess && resCitas.Value != null) citas = resCitas.Value.ToList();
+    }
+
+    private async Task BuscarPacientePorDocumento()
+    {
+        if (string.IsNullOrWhiteSpace(busquedaNumDoc))
+        {
+            mensajeError = "Ingrese un número de documento para realizar la búsqueda.";
+            return;
+        }
+
+        busquedaRealizada = true;
+        mensajeError = null;
+
+        var res = await PacienteRepository.GetByDocumentoAsync(busquedaTipoDoc, busquedaNumDoc.Trim());
+        if (res.IsSuccess && res.Value != null)
+        {
+            pacienteSeleccionado = res.Value;
+            modelo.PacienteId = pacienteSeleccionado.Id;
+        }
+        else
+        {
+            pacienteSeleccionado = null;
+            modelo.PacienteId = Guid.Empty;
+        }
+    }
+
+    private async Task OnBuscarKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await BuscarPacientePorDocumento();
+        }
+    }
+
+    private void AbrirFormularioNuevo()
+    {
+        modelo = new AgendarCitaRequest();
+        pacienteSeleccionado = null;
+        busquedaNumDoc = string.Empty;
+        busquedaRealizada = false;
+        mostrarFormulario = true;
+        mensajeExito = null;
+        mensajeError = null;
+    }
+
+    private void CancelarFormulario()
+    {
+        mostrarFormulario = false;
+    }
+
+    private async Task GuardarCita()
+    {
+        if (pacienteSeleccionado == null || modelo.PacienteId == Guid.Empty)
+        {
+            mensajeError = "Debe buscar y confirmar un paciente por número de documento antes de agendar la cita.";
+            return;
+        }
+
+        if (modelo.ProfesionalId == Guid.Empty)
+        {
+            mensajeError = "Debe seleccionar un profesional de la salud.";
+            return;
+        }
+
+        var res = await CitaRepository.AgendarAsync(modelo);
+        if (res.IsSuccess)
+        {
+            mensajeExito = $"Cita médica agendada exitosamente para el paciente {pacienteSeleccionado.NombreCompleto}.";
+            mostrarFormulario = false;
+            await CargarDatos();
+        }
+        else
+        {
+            mensajeError = res.Error;
+        }
+    }
+
+    private async Task CambiarEstado(Guid citaId, EstadoCita nuevoEstado)
+    {
+        var request = new CambiarEstadoCitaRequest
+        {
+            CitaId = citaId,
+            NuevoEstado = nuevoEstado,
+            Motivo = "Actualización desde interfaz Blazor"
+        };
+
+        var res = await CitaRepository.CambiarEstadoAsync(request);
+        if (res.IsSuccess)
+        {
+            mensajeExito = $"Cita actualizada a estado '{nuevoEstado}'.";
+            await CargarDatos();
+        }
+        else
+        {
+            mensajeError = res.Error;
+        }
+    }
+}

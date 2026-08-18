@@ -1,0 +1,270 @@
+@page "/admisiones"
+@rendermode InteractiveServer
+@inject IAdmisionRepository AdmisionRepository
+@inject ICitaRepository CitaRepository
+@inject IPacienteRepository PacienteRepository
+
+<PageTitle>Admisiones y Check-in - IPS SaaS</PageTitle>
+
+<div class="space-y-6">
+    <!-- Header Section -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="p-2 rounded-xl bg-emerald-50 text-emerald-600 text-xl font-bold">
+                    <i class="bi bi-journal-check"></i>
+                </span>
+                <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Admisiones y Check-in de Entrada</h1>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Validación de contratos (Particular vs Convenio EPS), autorización de servicios y cálculo de copagos</p>
+        </div>
+        <button class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]" @onclick="AbrirFormularioNuevo">
+            <i class="bi bi-plus-circle-fill"></i> Nueva Admisión (Check-in)
+        </button>
+    </div>
+
+    <!-- Notifications -->
+    @if (!string.IsNullOrEmpty(mensajeExito))
+    {
+        <div class="flex items-center justify-between p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium">
+            <div class="flex items-center gap-2">
+                <i class="bi bi-check-circle-fill text-emerald-600 text-lg"></i>
+                <span>@mensajeExito</span>
+            </div>
+            <button class="text-emerald-600 hover:text-emerald-800 font-bold" @onclick="() => mensajeExito = null">×</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="flex items-center justify-between p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium">
+            <div class="flex items-center gap-2">
+                <i class="bi bi-exclamation-triangle-fill text-red-600 text-lg"></i>
+                <span>@mensajeError</span>
+            </div>
+            <button class="text-red-600 hover:text-red-800 font-bold" @onclick="() => mensajeError = null">×</button>
+        </div>
+    }
+
+    <!-- Form Section -->
+    @if (mostrarFormulario)
+    {
+        <div class="bg-white rounded-2xl border border-emerald-200 shadow-xl overflow-hidden ring-4 ring-emerald-500/10">
+            <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 text-white flex items-center justify-between">
+                <h3 class="font-bold text-base flex items-center gap-2">
+                    <i class="bi bi-shield-lock"></i> Check-in de Admisión y Validación de Convenio EPS
+                </h3>
+                <button type="button" class="text-white/80 hover:text-white font-bold text-xl" @onclick="CancelarFormulario">×</button>
+            </div>
+            <div class="p-6">
+                <EditForm Model="@modelo" OnValidSubmit="GuardarAdmision">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold" />
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div class="lg:col-span-2">
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Cita Médica *</label>
+                            <InputSelect class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all" @bind-Value="modelo.CitaMedicaId" @bind-Value:after="AlSeleccionarCita">
+                                <option value="@Guid.Empty">-- Seleccione Cita Programada --</option>
+                                @if (citasProgramadas != null)
+                                {
+                                    @foreach (var c in citasProgramadas)
+                                    {
+                                        <option value="@c.Id">@c.FechaHora.ToString("dd/MM hh:mm tt") - Paciente: @c.NombrePaciente (@c.DocumentoPaciente)</option>
+                                    }
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Tipo de Contrato / Atención *</label>
+                            <InputSelect class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all" @bind-Value="modelo.TipoContrato" @bind-Value:after="RecalcularFinanzas">
+                                @foreach (var tipo in Enum.GetValues<TipoContrato>())
+                                {
+                                    <option value="@tipo">@tipo</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        @if (modelo.TipoContrato != TipoContrato.Particular)
+                        {
+                            <div>
+                                <label class="block text-xs font-bold uppercase tracking-wider text-red-600 mb-1">No. Autorización EPS * (Requerido)</label>
+                                <InputText class="w-full rounded-xl border border-red-300 bg-red-50/30 px-3.5 py-2 text-sm font-mono font-bold text-red-900 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 outline-none transition-all" @bind-Value="modelo.NumeroAutorizacion" placeholder="Ej: AUT-998877" />
+                            </div>
+                        }
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">EPS / Aseguradora</label>
+                            <InputText class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all" @bind-Value="modelo.EPS" placeholder="EPS del paciente" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Valor Total Consulta ($)</label>
+                            <InputNumber class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all" @bind-Value="modelo.ValorConsulta" @bind-Value:after="RecalcularFinanzas" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-sky-700 mb-1">Copago / Cuota Moderadora ($)</label>
+                            <InputNumber class="w-full rounded-xl border border-sky-300 bg-sky-50/40 px-3.5 py-2 text-sm font-bold text-sky-900 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 outline-none transition-all" @bind-Value="modelo.CopagoOCuotaModeradora" @bind-Value:after="RecalcularFinanzas" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">Valor Neto Entidad ($)</label>
+                            <input class="w-full rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-extrabold text-emerald-900 outline-none cursor-not-allowed" value="@ValorNetoCalculado.ToString("C0")" readonly />
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-100">
+                        <button type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-100 transition-colors" @onclick="CancelarFormulario">Cancelar</button>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2">
+                            <i class="bi bi-check-circle-fill"></i> Registrar Admisión
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+
+    <!-- Table Card -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div class="p-5 border-b border-slate-100 bg-slate-50/50">
+            <h2 class="font-bold text-slate-900 text-base">Historial de Admisiones Recientes</h2>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+                <thead>
+                    <tr class="bg-slate-100/70 border-b border-slate-200/60 text-slate-500 font-bold uppercase text-[11px] tracking-wider">
+                        <th class="py-3.5 px-4">Fecha Admisión</th>
+                        <th class="py-3.5 px-4">Paciente</th>
+                        <th class="py-3.5 px-4">Tipo Contrato</th>
+                        <th class="py-3.5 px-4">No. Autorización EPS</th>
+                        <th class="py-3.5 px-4">Valor Consulta</th>
+                        <th class="py-3.5 px-4">Copago / Cuota</th>
+                        <th class="py-3.5 px-4">Valor Neto Entidad</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-700">
+                    @if (admisiones == null)
+                    {
+                        <tr><td colspan="7" class="p-8 text-center text-slate-400">Cargando admisiones...</td></tr>
+                    }
+                    else if (!admisiones.Any())
+                    {
+                        <tr><td colspan="7" class="p-8 text-center text-slate-400">No hay admisiones registradas en el sistema.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var a in admisiones)
+                        {
+                            <tr class="hover:bg-slate-50/80 transition-colors">
+                                <td class="py-3.5 px-4 font-semibold text-slate-900">@a.FechaAdmision.ToString("dd/MM/yyyy hh:mm tt")</td>
+                                <td class="py-3.5 px-4 font-bold text-slate-900">@a.NombrePaciente</td>
+                                <td class="py-3.5 px-4">
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold @(a.TipoContrato == TipoContrato.Particular ? "bg-slate-800 text-white" : "bg-sky-100 text-sky-800")">
+                                        @a.TipoContrato
+                                    </span>
+                                </td>
+                                <td class="py-3.5 px-4 font-mono text-xs">
+                                    @if (!string.IsNullOrEmpty(a.NumeroAutorizacion))
+                                    {
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200">
+                                            <i class="bi bi-file-earmark-check"></i> @a.NumeroAutorizacion
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-slate-400 italic">N/A (Particular)</span>
+                                    }
+                                </td>
+                                <td class="py-3.5 px-4 font-medium">@a.ValorConsulta.ToString("C0")</td>
+                                <td class="py-3.5 px-4 font-bold text-sky-700">@a.CopagoOCuotaModeradora.ToString("C0")</td>
+                                <td class="py-3.5 px-4 font-extrabold text-emerald-700">@a.ValorNeto.ToString("C0")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<AdmisionDto>? admisiones;
+    private List<CitaDto>? citasProgramadas;
+    private bool mostrarFormulario = false;
+    private RegistrarAdmisionRequest modelo = new();
+    private string? mensajeExito;
+    private string? mensajeError;
+
+    private decimal ValorNetoCalculado
+    {
+        get
+        {
+            if (modelo.TipoContrato == TipoContrato.Particular) return 0;
+            return Math.Max(0, modelo.ValorConsulta - modelo.CopagoOCuotaModeradora);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarDatos();
+    }
+
+    private async Task CargarDatos()
+    {
+        var resAdms = await AdmisionRepository.GetAllAsync();
+        if (resAdms.IsSuccess && resAdms.Value != null) admisiones = resAdms.Value.ToList();
+
+        var resCitas = await CitaRepository.GetByEstadoAsync(EstadoCita.Programada);
+        if (resCitas.IsSuccess && resCitas.Value != null) citasProgramadas = resCitas.Value.ToList();
+    }
+
+    private void AbrirFormularioNuevo()
+    {
+        modelo = new RegistrarAdmisionRequest();
+        mostrarFormulario = true;
+        mensajeExito = null;
+        mensajeError = null;
+    }
+
+    private void CancelarFormulario()
+    {
+        mostrarFormulario = false;
+    }
+
+    private void AlSeleccionarCita()
+    {
+        var cita = citasProgramadas?.FirstOrDefault(c => c.Id == modelo.CitaMedicaId);
+        if (cita != null)
+        {
+            modelo.PacienteId = cita.PacienteId;
+        }
+        RecalcularFinanzas();
+    }
+
+    private void RecalcularFinanzas()
+    {
+        if (modelo.TipoContrato == TipoContrato.Particular)
+        {
+            modelo.CopagoOCuotaModeradora = modelo.ValorConsulta;
+            modelo.NumeroAutorizacion = string.Empty;
+        }
+    }
+
+    private async Task GuardarAdmision()
+    {
+        var res = await AdmisionRepository.RegistrarAsync(modelo);
+        if (res.IsSuccess)
+        {
+            mensajeExito = "Admisión y Check-in registrados correctamente. Paciente en Sala de Espera.";
+            mostrarFormulario = false;
+            await CargarDatos();
+        }
+        else
+        {
+            mensajeError = res.Error;
+        }
+    }
+}
